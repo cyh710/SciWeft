@@ -1,0 +1,49 @@
+# 实验配置：所有方法开关在此，run_eval.py 按 config 重跑 = 可复现实验
+run_name: abl-dense
+
+data:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  snapshot: "2026-10-25"        # data/raw 快照编号，结果表必须带此编号
+
+corpus:
+  chunk_size_tokens: 500        # 第一版固定长度 + 少量 overlap，不做组合搜索
+  chunk_overlap_tokens: 50
+
+retrieval:
+  method: dense                 # tfidf | bm25 | dense | hybrid
+  top_k: 50                     # 召回候选数（chunk 粒度）
+  dense_model: BAAI/bge-small-en-v1.5
+  rrf_k: 60                     # RRF 常数（hybrid 时生效）
+  fusion_w_sparse: 0.7          # 加权 RRF：W2 扫描的深度/精度最优折中
+  fusion_w_dense: 0.3
+  keep_neighbor_chunks: true    # 上届经验：相邻 chunk 一并保留可提分
+  # 证据窗口组装（W1 诊断结论：top-N chunk 常被同一篇文档占满 ->
+  # 跨文档题召不全。doc_diverse 取前 D 篇不同文档各 1 块 + 相邻块）
+  evidence_strategy: top_chunks   # top_chunks | doc_diverse | doc_grouped
+  evidence_docs: 8                 # doc_diverse 时的不同文档数
+  evidence_k: 8                    # 送入 LLM 的证据块总数
+  evidence_per_doc: 1              # doc_grouped 时每篇文档取几块
+  neighbor_words: 0                # 相邻块只取首尾各 N 词（整块拼接会让体积翻三倍）
+
+rerank:
+  enabled: true
+  model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  top_k_after: 16                # 精排后保留的证据数
+
+augment:
+  enabled: true
+  strategies: [expansion]                # paraphrase | expansion | abstraction
+  max_query_variants: 3
+
+generation:
+  provider: ""                  # 可替换 LLM Provider；空 = 使用本地模板占位
+  model: ""
+  temperature: 0                # 固定 0，保证可比与可复现
+  prompt_version: v1
+  cache_dir: cache/llm          # 同题同条件必须命中缓存
+  max_retries: 2                # 上届冠军经验：重试机制贡献显著
+
+eval:
+  split: dev                    # train | dev；test 仅冻结后使用
+  metrics: [recall@1, recall@5, recall@10, mrr, citation_f1, wattbot_score]

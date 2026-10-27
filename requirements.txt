@@ -1,0 +1,17 @@
+# W1 即需（轻量，CPU 即可）
+PyMuPDF>=1.24
+rank-bm25>=0.2.2
+scikit-learn>=1.5
+pandas>=2.2
+numpy>=1.26
+PyYAML>=6.0
+requests>=2.32
+tqdm>=4.66
+pytest>=8.0
+PyPDF2>=3.0          # 工作区现有 PDF 阅读沿用
+
+# W2 再装（体积大，装前确认磁盘/网络）
+# sentence-transformers>=3.0
+# torch
+
+# 可选：Reranker / LLM SDK（W3 按选型决定）

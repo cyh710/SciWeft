@@ -1,0 +1,41 @@
+# 数据与大文件不进 Git（官方礼仪 + 仓库体积）
+data/raw/*
+data/processed/*
+data/cache/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep
+cache/
+*.pdf
+*.parquet
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# 密钥与本地配置
+.env
+*.local.yaml
+
+# 大体积预测转储（experiments 保留 config 与指标，预测文件只在结题冻结版保留）
+experiments/**/predictions/
+experiments/submissions/
+
+# 临时 wheel 下载目录
+wheels/
+
+# 公开仓库红线：比赛数据不得再分发（官方规则 §7）
+# solution/score_output/cases/diagnosis 含 gold 答案；Score.py 与官方模板来自比赛数据页
+experiments/**/solution.csv
+experiments/**/score_output.txt
+experiments/**/cases.csv
+experiments/**/diagnosis.csv
+experiments/**/predictions_post.csv
+experiments/**/predictions_naunit.csv
+Score.py
+docs/WRITEUP_TEMPLATE.md
+docs/CONTRIBUTE_QUESTIONS.md
+experiments/**/predictions.csv

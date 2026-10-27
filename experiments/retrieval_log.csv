@@ -1,0 +1,12 @@
+timestamp,config,method,split,n_questions,n_chunks,recall@1,recall@5,recall@10,mrr
+2026-10-25T22:29:40,configs/baseline.yaml,bm25,dev,49,2797,0.6939,0.8878,0.9184,0.7968
+2026-10-25T22:29:44,configs/baseline.yaml,tfidf,dev,49,2797,0.6939,0.898,0.9184,0.8004
+2026-10-25T23:46:14,configs/baseline.yaml,bm25,dev,49,2868,0.6939,0.8878,0.9184,0.8002
+2026-10-25T23:46:21,configs/baseline.yaml,tfidf,dev,49,2868,0.6939,0.898,0.9184,0.8039
+2026-10-26T12:13:02,configs/baseline.yaml,dense,dev,49,2868,0.4082,0.7551,0.8265,0.5764
+2026-10-26T12:13:46,configs/baseline.yaml,hybrid,dev,49,2868,0.5816,0.8776,0.949,0.7299
+2026-10-26T12:39:49,scripts/sweep_fusion.py,hybrid_w1.0,dev,49,2868,0.6939,0.8878,0.9184,0.8002
+2026-10-26T12:39:51,scripts/sweep_fusion.py,hybrid_w0.8,dev,49,2868,0.6633,0.898,0.9082,0.7822
+2026-10-26T12:39:54,scripts/sweep_fusion.py,hybrid_w0.7,dev,49,2868,0.6122,0.9082,0.9388,0.7589
+2026-10-26T12:39:57,scripts/sweep_fusion.py,hybrid_w0.6,dev,49,2868,0.6224,0.8776,0.9388,0.7569
+2026-10-26T12:40:00,scripts/sweep_fusion.py,hybrid_w0.5,dev,49,2868,0.5816,0.8776,0.949,0.7299
