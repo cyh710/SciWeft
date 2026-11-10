@@ -1,11 +1,9 @@
 """预测后处理（W5）：把可确定性修复的格式错误规范化，无需重跑 LLM。
 
-规则（全部来自 245 题误差分析 + 官方评分规则的对照验证）：
-1. 区间方向修复：pred 是 "(a,b)" 但问题没有问 "range"（gold 形态学：陈述区间题
-   问句必含 range 字样 6/7；容差带题 gold 用 [a,b]，提交自己的区间 = 0 分）→
-   替换为区间中点单值。
-2. Scope 前缀剥离：unit 含 scope 而 value 写成 "Scope 2" → "2"。
-3. 数值清理：去千分位逗号、去货币符号前缀。
+规则（全部来自 245 题误差分析 + 官方评分规则的对照验证；曾在误差分析里设想过
+「区间方向修复」，实验为零增益已放弃，不在此实现）：
+1. Scope 前缀剥离：unit 含 scope 而 value 写成 "Scope 2" → "2"。
+2. 数值清理：去千分位逗号、去货币符号前缀。
 
 用法：python scripts/postprocess.py --in predictions.csv --out post.csv --questions train_QA.csv
 """
@@ -16,9 +14,7 @@ import re
 
 import pandas as pd
 
-_RANGE_RE = re.compile(r"^\(\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*\)$")
 _SCOPE_RE = re.compile(r"^scope\s*([0-9.]+)$", re.I)
-_ASK_RANGE_RE = re.compile(r"\brange\b", re.I)
 
 
 def postprocess_value(value: str, unit: str, question: str) -> str:

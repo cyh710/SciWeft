@@ -1,10 +1,11 @@
 """加权 RRF 融合扫描（W2）：不同 sparse/dense 权重下的文档级检索指标。
 
-用法：HF_ENDPOINT=https://hf-mirror.com python scripts/sweep_fusion.py
+用法：HF_ENDPOINT=https://hf-mirror.com python scripts/sweep_fusion.py [--weights 1.0,0.8,0.7,0.6,0.5]
 结果追加 experiments/retrieval_log.csv（method=hybrid_w{ws}）。
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import sys
@@ -36,6 +37,12 @@ def fused_hits(query: str, w_s: float, w_d: float, k: int = 60, top_k: int = 50)
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--weights", default="1.0,0.8,0.7,0.6,0.5",
+                    help="逗号分隔的 sparse 权重列表（dense 权重 = 1 - sparse）")
+    args = ap.parse_args()
+    weights = [float(w) for w in args.weights.split(",")]
+
     chunks = [Chunk(**json.loads(l)) for l in open(REPO / "data/processed/chunks.jsonl", encoding="utf-8")]
     bm25.build(chunks)
     dense.build(chunks, REPO / "data" / "cache")
@@ -46,7 +53,8 @@ def main() -> None:
     gold = {k: v for k, v in gold.items() if v}
 
     out = REPO / "experiments" / "retrieval_log.csv"
-    for w_s, w_d in [(1.0, 0.0), (0.8, 0.2), (0.7, 0.3), (0.6, 0.4), (0.5, 0.5)]:
+    for w_s in weights:
+        w_d = 1.0 - w_s
         r = {1: [], 5: [], 10: []}
         mrr = []
         for qid, g in gold.items():

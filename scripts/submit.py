@@ -1,6 +1,9 @@
 """生成 test 预测并做提交 schema 校验（W1 占位提交 / W5 正式提交）。
 
 用法：python scripts/submit.py --config configs/baseline.yaml --out experiments/submissions/final.csv
+管线与 run_eval.py 完全共用（src/rag/pipeline.py）：同一配置下两入口产出逐行一致，
+增强 / 重排 / dense / hybrid 配置在提交时同样生效。
+
 校验项（比赛硬要求）：
 - 列名与顺序同 train_QA.csv；
 - explanation 每行非空（空值过不了提交校验）；
@@ -11,7 +14,7 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
+import json
 import sys
 from pathlib import Path
 
@@ -21,13 +24,9 @@ import yaml
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from src.rag.evidence import select_evidence
-from src.rag.generate import answer_question
-from src.schemas import Answer, Chunk
-from src.sparse import bm25, tfidf
+from src.rag.pipeline import QAPipeline, SUBMIT_COLUMNS, fallback_answer, ref_id_field, ref_url_field
+from src.schemas import Chunk
 
-SUBMIT_COLUMNS = ["id", "question", "answer", "answer_value", "answer_unit",
-                  "ref_id", "ref_url", "supporting_materials", "explanation"]
 BLANK = "is_blank"
 
 
@@ -65,18 +64,8 @@ def main() -> None:
     chunks = []
     with open(REPO / cfg["data"]["processed_dir"] / "chunks.jsonl", encoding="utf-8") as f:
         for line in f:
-            chunks.append(Chunk(**__import__("json").loads(line)))
-    chunks_by_id = {c.chunk_id: c for c in chunks}
-
-    retriever = {"tfidf": tfidf, "bm25": bm25}[cfg["retrieval"]["method"]]
-    retriever.build(chunks)
-    r = cfg["retrieval"]
-    ev_cfg = {"strategy": r.get("evidence_strategy", "top_chunks"),
-              "n_evidence": r.get("evidence_k", cfg["rerank"]["top_k_after"]),
-              "n_docs": r.get("evidence_docs", 4),
-              "per_doc": r.get("evidence_per_doc", 2),
-              "keep_neighbors": r.get("keep_neighbor_chunks", True),
-              "neighbor_words": r.get("neighbor_words", 200)}
+            chunks.append(Chunk(**json.loads(line)))
+    pipe = QAPipeline(cfg, chunks, cache_dir=REPO / "data" / "cache")
 
     meta = pd.read_csv(REPO / "data" / "raw" / "metadata.csv", encoding="utf-8-sig")
     url_map = dict(zip(meta["id"], meta["url"]))
@@ -88,26 +77,20 @@ def main() -> None:
 
     rows, n_fail = [], 0
     for q in qs.itertuples(index=False):
-        hits = retriever.retrieve(q.question, top_k=r["top_k"])
-        ev_hits, ev_texts = select_evidence(hits, chunks_by_id, **ev_cfg)
+        unit_hint = str(getattr(q, "answer_unit", ""))
         try:
-            ans: Answer = answer_question(q.question, ev_hits, ev_texts, unit_hint=str(q.answer_unit))
-        except Exception as exc:  # noqa: BLE001
+            ans = pipe.run(q.question, unit_hint=unit_hint)
+        except Exception as exc:  # noqa: BLE001  单题失败不中断全跑
             n_fail += 1
-            ans = Answer(question_id="", value=BLANK, unit=BLANK,
-                         answer_text="Unable to answer with confidence based on the provided documents.",
-                         citation_ref_ids=[], evidence=BLANK,
-                         explanation=f"generation error: {exc!r}"[:300], is_blank=True)
-        refs = ans.citation_ref_ids
+            ans = fallback_answer(unit_hint, reason=f"generation error: {exc!r}")
         rows.append({
             "id": q.id, "question": q.question, "answer": ans.answer_text,
             "answer_value": ans.value, "answer_unit": ans.unit,
-            "ref_id": str(refs) if refs else BLANK,
-            "ref_url": (url_map.get(refs[0], "") if len(refs) == 1 else
-                        (str([url_map.get(x, "") for x in refs]) if refs else BLANK)),
+            "ref_id": ref_id_field(ans.citation_ref_ids),
+            "ref_url": ref_url_field(ans.citation_ref_ids, url_map),
             "supporting_materials": ans.evidence, "explanation": ans.explanation,
         })
-        print(f"[{len(rows)}/{len(qs)}] {q.id}: value={ans.value!r} refs={refs}")
+        print(f"[{len(rows)}/{len(qs)}] {q.id}: value={ans.value!r} refs={ans.citation_ref_ids}")
 
     pred = pd.DataFrame(rows, columns=SUBMIT_COLUMNS)
     problems = validate(pred, valid_refs)

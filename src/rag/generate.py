@@ -53,7 +53,25 @@ Question: How much does an elephant weigh?
 Evidence: [1] ref_id=luccioni2025c (score 12.4): ... ChatGPT energy consumption ... 0.3 Wh ...
 Output: {"is_blank": true, "answer_value": "is_blank", "answer_unit": "is_blank", "answer": "Unable to answer with confidence based on the provided documents.", "ref_ids": [], "supporting_materials": "is_blank", "explanation": "None of the excerpts concerns the mass of an elephant; the corpus does not support an answer."}"""
 
-_JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
+_JSON_DECODER = json.JSONDecoder()
+
+
+def _extract_json_object(raw: str) -> dict | None:
+    """提取模型输出里第一个完整的 JSON 对象。
+
+    用 raw_decode 按括号配平解析，容忍前后散文与 markdown 围栏；
+    贪婪正则 r"\\{.*\\}" 遇到「JSON 后跟散文再跟一个对象」必然解析失败。
+    """
+    for i, ch in enumerate(raw):
+        if ch != "{":
+            continue
+        try:
+            obj, _ = _JSON_DECODER.raw_decode(raw[i:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 def _format_evidence(hits: list[Hit], chunk_texts: dict[str, str]) -> str:
@@ -73,11 +91,13 @@ def answer_question(question: str, hits: list[Hit], chunk_texts: dict[str, str],
     user += f"\nEvidence excerpts (ranked):\n{evidence}"
 
     raw = chat([{"role": "user", "content": user}], system=SYSTEM_PROMPT)
-    try:
-        data = json.loads(_JSON_RE.search(raw).group(0))
-    except Exception:
+    data = _extract_json_object(raw)
+    parse_failed = data is None
+    if parse_failed:
+        # 解析失败 ≠ 语料无证据：保留可提交的拒答行，但 explanation 标明真实原因，
+        # 避免排查时被「语料无证据」误导成检索问题。
         data = {"is_blank": False, "answer_value": "", "answer_unit": "is_blank",
-                "answer": "Parsing failed; see evidence.", "ref_ids": [],
+                "answer": "Parsing failed; see explanation.", "ref_ids": [],
                 "supporting_materials": "", "explanation": "LLM output could not be parsed as JSON."}
 
     refs = [r for r in data.get("ref_ids", []) if r in allowed_refs]  # 引用必须存在于候选证据
@@ -86,11 +106,14 @@ def answer_question(question: str, hits: list[Hit], chunk_texts: dict[str, str],
         # 官方约定：拒答行 value/refs/evidence 置空，但 answer_unit 保留题面给定单位
         # （官方 data 页原文：answer_unit is deliberately NOT required to be blank）
         unit = unit_hint.strip() if unit_hint and unit_hint not in ("is_blank", "nan", "") else "is_blank"
+        explanation = ("[parse-failed] LLM output could not be parsed as JSON; "
+                       "treated as refusal." if parse_failed else
+                       "The provided corpus does not contain evidence supporting an answer.")
         return Answer(
             question_id="", value="is_blank", unit=unit,
             answer_text="Unable to answer with confidence based on the provided documents.",
             citation_ref_ids=[], evidence="is_blank",
-            explanation="The provided corpus does not contain evidence supporting an answer.",
+            explanation=explanation,
             is_blank=True,
         )
     if not refs:  # 有答案但没给合法引用：退回排名第一的证据

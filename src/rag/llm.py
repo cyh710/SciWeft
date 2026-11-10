@@ -4,8 +4,11 @@
 LLM_KIND=openai      -> POST {base}/chat/completions
 LLM_KIND=anthropic   -> POST {base}/v1/messages
 
-同题同条件命中磁盘缓存；429 限流按 Retry-After 退避；
-思考型模型若把 max_tokens 吃光导致无正文，自动翻倍预算重试。
+config 的 generation 段通过 configure() 注入（cache_dir / max_retries / temperature），
+未注入时用下面的默认值——保证「配置里写了就生效」。
+同题同条件命中磁盘缓存（键含 base_url，换服务商/端点旧缓存自动失效）；
+429 限流按 Retry-After 退避；思考型模型若把 max_tokens 吃光导致无正文，自动翻倍预算重试。
+本地回环地址不走系统代理（HTTPS_PROXY 会劫持 127.0.0.1 上的调试端点）。
 """
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -28,7 +32,23 @@ KIND = os.environ.get("LLM_KIND", "openai").lower()
 CACHE_DIR = REPO / "cache" / "llm"
 MAX_RETRIES = 5
 MIN_INTERVAL = float(os.environ.get("LLM_MIN_INTERVAL", "2"))  # 请求间隔秒数，防 429
+DEFAULT_TEMPERATURE = 0.0
 _last_call = 0.0
+
+
+def configure(cache_dir=None, max_retries=None, temperature=None) -> None:
+    """把 config 的 generation 段注入模块状态（None = 保持现状）。
+
+    run_eval / submit 加载 config 后调用；相对路径按仓库根解析。
+    """
+    global CACHE_DIR, MAX_RETRIES, DEFAULT_TEMPERATURE
+    if cache_dir:
+        p = Path(cache_dir)
+        CACHE_DIR = p if p.is_absolute() else REPO / p
+    if max_retries is not None:
+        MAX_RETRIES = int(max_retries)
+    if temperature is not None:
+        DEFAULT_TEMPERATURE = float(temperature)
 
 
 class _RateLimited(Exception):
@@ -39,16 +59,26 @@ class _RateLimited(Exception):
         self.retry_after = retry_after
 
 
+def _session_for(url: str) -> requests.Session:
+    """本地回环端点绕过系统代理；外部端点沿用环境代理（企业内网调 API 仍可用）。"""
+    s = requests.Session()
+    host = urlparse(url).hostname or ""
+    if host in ("127.0.0.1", "localhost", "::1"):
+        s.trust_env = False
+    return s
+
+
 def _post(payload: dict) -> dict:
+    s = _session_for(BASE_URL)
     if KIND == "anthropic":
-        r = requests.post(
+        r = s.post(
             f"{BASE_URL}/v1/messages",
             headers={"x-api-key": API_KEY, "anthropic-version": "2023-06-01",
                      "content-type": "application/json"},
             json=payload, timeout=240,
         )
     else:
-        r = requests.post(
+        r = s.post(
             f"{BASE_URL}/chat/completions",
             headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
             json=payload, timeout=240,
@@ -68,12 +98,24 @@ def _extract_text(data: dict) -> str:
     return (choices[0].get("message", {}).get("content") or "").strip()
 
 
-def chat(messages: list[dict], system: str = "", max_tokens: int = 6000, temperature: float = 0.0) -> str:
-    """调用 LLM 并返回正文文本。带磁盘缓存、限流退避与预算自适应。"""
-    key = hashlib.sha256(json.dumps(
-        {"m": MODEL, "k": KIND, "s": system, "msg": messages, "t": temperature, "k2": max_tokens},
+def _cache_key(system: str, messages: list[dict], temperature: float, max_tokens: int) -> str:
+    """缓存键含 base_url：换服务商/端点（如调试端点换回官方）旧缓存必须失效。"""
+    return hashlib.sha256(json.dumps(
+        {"u": BASE_URL, "m": MODEL, "k": KIND, "s": system, "msg": messages,
+         "t": temperature, "k2": max_tokens},
         ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    cache = CACHE_DIR / f"{key}.json"
+
+
+def chat(messages: list[dict], system: str = "", max_tokens: int = 6000,
+         temperature: float | None = None) -> str:
+    """调用 LLM 并返回正文文本。带磁盘缓存、限流退避与预算自适应。
+
+    temperature=None 时用 configure() 注入的 DEFAULT_TEMPERATURE（config 可配）。
+    """
+    global _last_call
+    if temperature is None:
+        temperature = DEFAULT_TEMPERATURE
+    cache = CACHE_DIR / f"{_cache_key(system, messages, temperature, max_tokens)}.json"
     if cache.exists():
         return json.loads(cache.read_text(encoding="utf-8"))["text"]
 
@@ -87,7 +129,6 @@ def chat(messages: list[dict], system: str = "", max_tokens: int = 6000, tempera
 
     last_err = None
     for attempt in range(MAX_RETRIES + 1):
-        global _last_call
         wait = MIN_INTERVAL - (time.time() - _last_call)
         if wait > 0:
             time.sleep(wait)

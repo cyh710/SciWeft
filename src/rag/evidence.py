@@ -30,7 +30,8 @@ def _window(text: str, from_end: bool, n_words: int) -> str:
 
 def select_evidence(hits: list[Hit], chunks_by_id: dict[str, Chunk], strategy: str = "doc_grouped",
                     n_evidence: int = 6, n_docs: int = 4, per_doc: int = 2,
-                    keep_neighbors: bool = True, neighbor_words: int = 0) -> tuple[list[Hit], dict[str, str]]:
+                    keep_neighbors: bool = True, neighbor_words: int = 0,
+                    max_total_words: int | None = None) -> tuple[list[Hit], dict[str, str]]:
     """返回 (送给 LLM 的 hit 列表, chunk_id -> 文本 映射)。
 
     keep_neighbors=True 时附带相邻块内容：
@@ -38,7 +39,15 @@ def select_evidence(hits: list[Hit], chunks_by_id: dict[str, Chunk], strategy: s
     - neighbor_words>0 -> 只取相邻块首尾各 N 词的窗口（体积约为整块的 1/2）。
     实测（dev 代理指标"答案值出现在证据中"）：无邻接 79.6% / 窗口200词 79.6% /
     整块 83.7%。本项目的瓶颈是准确率不是 token 成本，故默认取整块。
+
+    max_total_words（默认 None = 不设预算，行为与历史一致）：证据总词数上限，
+    按 rank 顺序累加；下一块装不下时截断到剩余额度（加 "[...truncated...]" 标记）
+    并停止，其后命中整体丢弃。返回的 hit 列表与文本映射同步裁剪——被预算丢掉
+    的块不在窗口内，引用契约（引用仅限证据窗口）由 generate 层据 hit 列表保证。
+    非 None 但 <=0 视为配置笔误，直接 ValueError（静默产出空证据会让全题拒答）。
     """
+    if max_total_words is not None and max_total_words <= 0:
+        raise ValueError(f"max_total_words 必须为正整数或 None，得到 {max_total_words!r}")
     if not hits:
         return [], {}
 
@@ -64,24 +73,37 @@ def select_evidence(hits: list[Hit], chunks_by_id: dict[str, Chunk], strategy: s
         chosen = picked
 
     texts: dict[str, str] = {}
+    kept: list[Hit] = []
+    used = 0
     for h in chosen:
         ch = chunks_by_id.get(h.chunk_id)
         if ch is None:
-            texts[h.chunk_id] = h.snippet
-            continue
-        parts = [ch.text]
-        if keep_neighbors:
-            seq = _chunk_seq(ch.chunk_id)
-            prev = chunks_by_id.get(f"{ch.ref_id}:{seq - 1}")
-            nxt = chunks_by_id.get(f"{ch.ref_id}:{seq + 1}")
-            for nb, from_end, label in ((prev, True, "[...preceding context...] "),
-                                        (nxt, False, "[...following context...] ")):
-                if nb is None:
-                    continue
-                if neighbor_words > 0:
-                    parts.insert(0, label + _window(nb.text, from_end, neighbor_words)) if from_end \
-                        else parts.append(label + _window(nb.text, from_end, neighbor_words))
-                else:
-                    parts.insert(0, label + nb.text) if from_end else parts.append(label + nb.text)
-        texts[h.chunk_id] = "\n".join(parts)
-    return chosen, texts
+            full = h.snippet
+        else:
+            parts = [ch.text]
+            if keep_neighbors:
+                seq = _chunk_seq(ch.chunk_id)
+                prev = chunks_by_id.get(f"{ch.ref_id}:{seq - 1}")
+                nxt = chunks_by_id.get(f"{ch.ref_id}:{seq + 1}")
+                for nb, from_end, label in ((prev, True, "[...preceding context...] "),
+                                            (nxt, False, "[...following context...] ")):
+                    if nb is None:
+                        continue
+                    if neighbor_words > 0:
+                        parts.insert(0, label + _window(nb.text, from_end, neighbor_words)) if from_end \
+                            else parts.append(label + _window(nb.text, from_end, neighbor_words))
+                    else:
+                        parts.insert(0, label + nb.text) if from_end else parts.append(label + nb.text)
+            full = "\n".join(parts)
+        if max_total_words is not None:
+            words = full.split()
+            remaining = max_total_words - used
+            if remaining <= 0:
+                break
+            if len(words) > remaining:
+                full = " ".join(words[:remaining]) + " [...truncated...]"
+        texts[h.chunk_id] = full
+        kept.append(h)
+        if max_total_words is not None:
+            used += len(full.split())
+    return kept, texts

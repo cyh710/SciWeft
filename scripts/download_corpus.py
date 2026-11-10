@@ -29,8 +29,8 @@ SLEEP_SECONDS = 5.0
 TIMEOUT = 90
 UA = "wattbot-nlp/0.1 (course project; one-time pinned-version fetch)"
 
-# 语料 URL 全部是外网（arXiv/出版社/机构站），默认走本机 Clash 代理；置 CORPUS_PROXY="" 可禁用
-PROXY_URL = os.environ.get("CORPUS_PROXY", "http://127.0.0.1:7897")
+# 语料 URL 全部是外网（arXiv/出版社/机构站）。默认直连；需要代理时设 CORPUS_PROXY（如 http://127.0.0.1:7890）
+PROXY_URL = os.environ.get("CORPUS_PROXY", "")
 PROXIES = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
 
