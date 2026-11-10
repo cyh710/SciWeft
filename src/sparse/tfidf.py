@@ -28,7 +28,8 @@ def build(chunks: list[Chunk]) -> None:
 
 
 def retrieve(query: str, top_k: int = 50) -> list[Hit]:
-    assert _corpus_matrix is not None, "先调用 build()"
+    if _corpus_matrix is None:
+        raise RuntimeError("TF-IDF 检索器未初始化，先调用 build()（python -O 下 assert 会剥离，故显式抛错）")
     q = normalize(_vectorizer.transform([_tokenize(query)]))
     scores = (_corpus_matrix @ q.T).toarray().ravel()
     order = np.argsort(-scores)[:top_k]

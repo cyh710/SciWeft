@@ -42,8 +42,8 @@ def main() -> None:
         except Exception:
             pred_refs = []
         na_gold = str(s["answer_value"]).strip() == "is_blank"
-        value_ok = (str(p["answer_value"]).strip() == str(s["answer_value"]).strip()) if na_gold \
-            else str(p["answer_value"]).strip() == str(s["answer_value"]).strip()
+        # 宽松数值比对交给 Score.py；此处只做严格串等（gold 拒答 ⇔ pred 拒答 或 值相等）
+        value_ok = str(p["answer_value"]).strip() == str(s["answer_value"]).strip()
         ref_ok = set(x.lower() for x in gold_refs) == set(x.lower() for x in pred_refs)
         types = [t for t in TYPE_COLS if t in sol.columns and int(s.get(t, 0) or 0) == 1]
         # 宽松数值比对交给 Score.py；此处只做严格串等，作为"候选错题"导出，人工+Score.py 复核

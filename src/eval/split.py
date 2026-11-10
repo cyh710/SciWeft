@@ -16,9 +16,15 @@ DEV_FRACTION = 0.2
 SEED = 42
 
 
+def _flag(row: pd.Series, name: str) -> bool:
+    """列缺失或空单元格（NaN）都按 0 处理；bool(NaN) 是 True，直接判会把题全归 is_NA。"""
+    v = row.get(name, 0)
+    return False if pd.isna(v) else bool(int(v))
+
+
 def primary_type(row: pd.Series) -> str:
     for flag in PRIORITY:
-        if bool(row.get(flag, 0)):
+        if _flag(row, flag):
             return flag
     return "Quote"
 

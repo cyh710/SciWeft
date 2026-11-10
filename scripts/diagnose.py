@@ -17,8 +17,8 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
 from src.eval.retrieval_metrics import parse_gold_ref_ids
+from src.rag.pipeline import build_retriever, hybrid_kwargs
 from src.schemas import Chunk
-from src.sparse import bm25, tfidf
 
 
 def main() -> None:
@@ -38,8 +38,8 @@ def main() -> None:
     with open(REPO / cfg["data"]["processed_dir"] / "chunks.jsonl", encoding="utf-8") as f:
         for line in f:
             chunks.append(Chunk(**json.loads(line)))
-    retriever = {"tfidf": tfidf, "bm25": bm25}[cfg["retrieval"]["method"]]
-    retriever.build(chunks)
+    retriever = build_retriever(cfg["retrieval"]["method"], chunks, REPO / "data" / "cache")
+    retrieve_kwargs = hybrid_kwargs(cfg["retrieval"])
     n_ev = args.evidence_k or cfg["rerank"]["top_k_after"]
 
     gold_map = {r.id: parse_gold_ref_ids(r.ref_id) for r in sol.itertuples(index=False)}
@@ -50,7 +50,7 @@ def main() -> None:
     for qid, gold in gold_map.items():
         if not gold:
             continue
-        hits = retriever.retrieve(q_map[qid], top_k=cfg["retrieval"]["top_k"])[:n_ev]
+        hits = retriever.retrieve(q_map[qid], top_k=cfg["retrieval"]["top_k"], **retrieve_kwargs)[:n_ev]
         ev_refs = []
         for h in hits:
             if h.ref_id not in ev_refs:

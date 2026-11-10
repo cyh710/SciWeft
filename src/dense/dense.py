@@ -1,12 +1,13 @@
 """Dense 检索器（M3）：BGE-small + NumPy 余弦相似度（小语料无需 FAISS）。
 
-- chunk 向量一次性编码并缓存到 data/cache/（键 = 模型名 + chunk 数）；
+- chunk 向量一次性编码并缓存到 data/cache/（键 = 模型名 + chunk_id 列表哈希，
+  换语料或换分块参数自动失效，不会误命中同规模的旧向量）；
 - bge v1.5 对短查询建议加检索指令前缀；
 - 向量全部 L2 归一化，点积即余弦。
 """
 from __future__ import annotations
 
-import re
+import hashlib
 
 import numpy as np
 
@@ -28,14 +29,16 @@ def _get_model():
     return _model
 
 
-def _tokenize(text: str) -> str:  # 保持与 sparse 相同的口径仅用于缓存键，编码用原文
-    return text
+def cache_key(chunks: list[Chunk]) -> str:
+    """向量缓存键：模型名 + chunk_id 序列哈希。块数相同但内容不同也不会碰撞。"""
+    payload = "|".join(c.chunk_id for c in chunks) + "|" + MODEL_NAME
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
 def embed_corpus(chunks: list[Chunk], cache_dir) -> np.ndarray:
-    """编码全部 chunk 并按 (模型, 数量) 缓存。"""
+    """编码全部 chunk 并按 (模型, chunk_id 序列) 缓存。"""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache = cache_dir / f"emb_{MODEL_NAME.replace('/', '_')}_{len(chunks)}.npy"
+    cache = cache_dir / f"emb_{cache_key(chunks)}.npy"
     if cache.exists():
         return np.load(cache)
     model = _get_model()
@@ -47,12 +50,15 @@ def embed_corpus(chunks: list[Chunk], cache_dir) -> np.ndarray:
 
 def build(chunks: list[Chunk], cache_dir=None) -> None:
     global _corpus, _chunks
+    if cache_dir is None:
+        raise RuntimeError("dense.build 需要显式传入 cache_dir（脚本里是 data/cache），否则向量无处缓存")
     _chunks = chunks
     _corpus = embed_corpus(chunks, cache_dir)
 
 
 def retrieve(query: str, top_k: int = 50) -> list[Hit]:
-    assert _corpus is not None, "先调用 build()"
+    if _corpus is None:
+        raise RuntimeError("dense 检索器未初始化，先调用 build()（python -O 下 assert 会剥离，故显式抛错）")
     model = _get_model()
     q = model.encode([QUERY_INSTRUCTION + query], normalize_embeddings=True,
                      convert_to_numpy=True)[0]

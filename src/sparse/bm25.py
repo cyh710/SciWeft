@@ -24,7 +24,8 @@ def build(chunks: list[Chunk]) -> None:
 
 
 def retrieve(query: str, top_k: int = 50) -> list[Hit]:
-    assert _bm25 is not None, "先调用 build()"
+    if _bm25 is None:
+        raise RuntimeError("BM25 检索器未初始化，先调用 build()（python -O 下 assert 会剥离，故显式抛错）")
     scores = _bm25.get_scores(_tokenize(query))
     order = sorted(range(len(scores)), key=lambda i: -scores[i])[:top_k]
     return [

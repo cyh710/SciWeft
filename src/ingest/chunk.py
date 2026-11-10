@@ -1,8 +1,8 @@
 """chunk_documents：逐页文本 -> 跨页固定长度分块（W1）。
 
-策略：按空白分词近似 token 计数，
-chunk_size=400 词（约 500 tokens），overlap=40 词。块跨页时记录 page_start/page_end，
-保证证据可回溯到页码。chunk_id = {ref_id}:{seq}，唯一且持久。
+策略：按空白分词近似 token 计数。脚本传入 config 的 chunk_size_tokens/chunk_overlap_tokens
+（当前全部 config 为 500 词 / 50 词 overlap）；下面的默认值仅供直接调用。
+块跨页时记录 page_start/page_end，保证证据可回溯到页码。chunk_id = {ref_id}:{seq}，唯一且持久。
 """
 from __future__ import annotations
 

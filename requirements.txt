@@ -1,4 +1,4 @@
-# W1 即需（轻量，CPU 即可）
+# 基础依赖（轻量，CPU 即可）
 PyMuPDF>=1.24
 rank-bm25>=0.2.2
 scikit-learn>=1.5
@@ -8,10 +8,10 @@ PyYAML>=6.0
 requests>=2.32
 tqdm>=4.66
 pytest>=8.0
-PyPDF2>=3.0          # 工作区现有 PDF 阅读沿用
+python-dotenv>=1.0     # src/rag/llm.py 硬导入，缺失则所有生成脚本 ModuleNotFoundError
+PyPDF2>=3.0            # 工作区现有 PDF 阅读沿用
 
-# W2 再装（体积大，装前确认磁盘/网络）
-# sentence-transformers>=3.0
-# torch
-
-# 可选：Reranker / LLM SDK（W3 按选型决定）
+# 重排 / 稠密检索（体积大，装前确认磁盘/网络）
+# 最终提交配置 aug_expansion_v3.yaml 等开启了 rerank.enabled，不装跑不了主配置
+sentence-transformers>=3.0
+torch
